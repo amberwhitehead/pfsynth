@@ -95,3 +95,24 @@ separate regression tests cover the intentionally shorter tails.
 Use `npm run dev` while editing and `npm test` to check synthesis and voice
 cleanup. The current voice limits are in **Performance update** above; the
 earlier Audio section describes the original, longer-lived voice settings.
+
+## Latest upstream sync
+
+See [SYNC.md](SYNC.md) for the 2026-09-06 audit against upstream `3c12586`,
+the ported restrike/limiter/treble fixes, current behavior, intentional
+differences, and verification commands. `node native/check-sync.mjs` detects
+changes to the audited upstream files and fitted data. The live output uses
+the peak limiter with a 50 ms hold, not the older tanh mentioned above; the
+current patch has 30 anchors spanning A0–C8. Live attack trims vary by note.
+
+## Demo shortcuts
+
+- **Ctrl+F**: Für Elise opening.
+- **Ctrl+B**: first four bars of Bach's Prelude in C major, BWV 846.
+- Press the same shortcut again or **Escape** to stop. Press the other shortcut
+  to switch songs. Switching away from the page also cancels playback.
+
+`src/bach-prelude.ts` expands four voicings into the repeated sixteenth-note
+pattern. Both songs use the same cancellable `ScorePlayer`, audio engine, and
+key highlights. Ctrl+B takes precedence over the browser shortcut while the
+page has focus, including when a slider is focused.

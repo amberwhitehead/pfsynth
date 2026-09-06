@@ -9,10 +9,10 @@ const data = JSON.parse(fs.readFileSync(new URL('../src/attack.json', import.met
 function f32(value) {return Array.isArray(value) ? value.map(f32) : typeof value === 'number' ? Math.fround(value) : value;}
 const attack = Object.fromEntries(Object.entries(data).map(([key,value]) => [key, f32(value)]));
 const wasm = new WebAssembly.Module(fs.readFileSync(new URL('./reference.wasm', import.meta.url)));
-for (const sr of [44100, 48000]) {
-  for (const [note, velocity, sustain] of [[36, .4, false], [60, 80/127, false], [69, .8, true], [96, .9, false]]) {
-    const c = new WebAssembly.Instance(wasm, {env: Math}).exports; c.init(sr);
-    const engine = new PianoEngine(sr, patch, attack); const output = new Float32Array(128);
+for (const live of [false, true]) for (const sr of [44100, 48000]) {
+  for (const [note, velocity, sustain] of [[21, .25, false], [36, .4, false], [60, 80/127, false], [69, .8, true], [82, 1, false], [87, .7, false], [92, .8, false], [96, .9, false], [99, 1, false], [102, .8, false], [108, 1, false]]) {
+    const c = new WebAssembly.Instance(wasm, {env: Math}).exports; c.init(sr); c.set_live(live ? 1 : 0);
+    const engine = new PianoEngine(sr, patch, attack, live); const output = new Float32Array(128);
     c.sustain(sustain ? 1 : 0); engine.sustain(sustain ? 1 : 0);
     c.on(1, note, velocity); engine.on(1, note, velocity);
     let err = 0, ref = 0, peak = 0;
@@ -26,7 +26,7 @@ for (const sr of [44100, 48000]) {
       }
     }
     const relative = Math.sqrt(err / ref);
-    console.log(`${sr} Hz, MIDI ${note}, sustain ${sustain}: relative RMS error ${relative.toExponential(3)}, peak ${peak.toFixed(3)}`);
+    console.log(`${live ? "live" : "raw"}, ${sr} Hz, MIDI ${note}, sustain ${sustain}: relative RMS error ${relative.toExponential(3)}, peak ${peak.toFixed(3)}`);
     assert(peak > .001, 'note must produce sound'); assert(relative < .001, 'port must match C within 0.1% RMS');
   }
 }
@@ -59,3 +59,25 @@ for (const sr of [44100, 48000]) {
   assert.equal(v.fadeLeft, Math.round(.04 * sr)); renderSeconds(.045); assert.equal(e.voices.length, 0);
 }
 console.log('Dense playing, pedal-up cleanup, sustain lifetime, and fade retirement regressions passed.');
+
+// Host fixes must match C too: loud chords exercise limiter hold; repeats exercise takeover.
+for (const sr of [44100, 48000]) {
+  const c = new WebAssembly.Instance(wasm, {env: Math}).exports;
+  c.init(sr); c.set_live(1);
+  const e = new PianoEngine(sr, patch, attack, true), out = new Float32Array(128);
+  let error = 0, reference = 0, sawHold = false;
+  for (const n of [48,52,55,60,64,67,72,76,79]) {c.on(n,n,1); e.on(n,n,1);}
+  const count = e.voices.length;
+  c.on(500,60,1); e.on(500,60,1); assert.equal(e.voices.length,count,'duplicate within 5 ms is ignored');
+  for (let b = 0; b < 200; b++) {
+    if (b === 60) {c.on(501,60,.8); e.on(501,60,.8); assert(e.voices.some(v=>v.midi===60 && v.restriking));}
+    const original = new Float32Array(c.memory.buffer,c.render(),128); e.render(out);
+    sawHold ||= e.limHold > 0;
+    for (let i=0;i<128;i++) {assert(Number.isFinite(out[i])); assert(Math.abs(out[i])<=1);error+=(out[i]-original[i])**2;reference+=original[i]**2;}
+  }
+  assert(sawHold,'loud chord must exercise limiter hold');
+  assert(!e.voices.some(v=>v.restriking),'replaced voice must retire');
+  const relative = Math.sqrt(error/reference); assert(relative<.001,`host parity ${relative}`);
+  e.panic(); assert.equal(e.limGain,1); assert.equal(e.limHold,0);
+  console.log(`Host parity ${sr} Hz: ${relative.toExponential(3)}; restrike, duplicate suppression and limiter hold passed.`);
+}

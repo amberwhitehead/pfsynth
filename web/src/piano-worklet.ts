@@ -6,13 +6,8 @@ class PianoProcessor extends AudioWorkletProcessor {
   engine: PianoEngine;
   constructor(options: {processorOptions: {patch: ArrayBuffer; attack: AttackPatch}}) {
     super();
-    const attack = options.processorOptions.attack;
-    // Ear-tuned onset trims (experiments/attack-ptq/listening-trims.json), same defaults as
-    // the native player and demo app: slow body modes, fast knock modes, noise burst.
-    attack.slow_mix = (attack.slow_mix ?? 1) * 10 ** (-18 / 20);
-    attack.knock_mix = (attack.knock_mix ?? 1) * 10 ** (-22 / 20);
-    attack.noise_mix = (attack.noise_mix ?? 1) * 10 ** (-17 / 20);
-    this.engine = new PianoEngine(sampleRate, new Patch(options.processorOptions.patch), attack);
+    // Per-key live trims are applied at note-on, as in pfplayer.c:key_trims.
+    this.engine = new PianoEngine(sampleRate, new Patch(options.processorOptions.patch), options.processorOptions.attack, true);
     this.port.onmessage = ({data}) => {
       if (data.type === 'on') this.engine.on(data.id, data.note, data.velocity);
       if (data.type === 'off') this.engine.off(data.id);

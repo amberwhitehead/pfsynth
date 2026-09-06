@@ -1,7 +1,8 @@
 import './style.css';
 import workletURL from './piano-worklet.ts?worker&url';
 import attackData from './attack.json';
-import {ScorePlayer} from './fur-elise';
+import {ScorePlayer, furElise} from './fur-elise';
+import {bachPrelude} from './bach-prelude';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <main>
@@ -11,7 +12,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div class="display"><div class="readout"><span id="status" role="status">Sound is off</span><strong id="note">—</strong></div><canvas id="scope" aria-hidden="true"></canvas><span class="display-label">pfsynth<br>PARTIAL PIANO</span></div>
     <div class="controls"><div class="octave"><span class="label">Octave</span><button id="lower" aria-label="Lower octave">−</button><output id="octave">4</output><button id="higher" aria-label="Higher octave">+</button></div><label class="range">Touch <input id="velocity" type="range" min="20" max="127" value="80"><output id="velocity-value">80</output></label><label class="range">Volume <input id="volume" type="range" min="0" max="100" value="65"></label><button id="sustain" aria-pressed="false"><i></i>Sustain <kbd>SPACE</kbd></button></div>
     <div class="keyboard-wrap"><div id="keyboard" class="keyboard" role="group" aria-label="Piano keys"></div></div>
-    <div class="below-keys"><span>Click, touch, or use the letter keys.<br><kbd>CTRL F</kbd> Für Elise · press again or <kbd>ESC</kbd> to stop</span><span><kbd>←</kbd> <kbd>→</kbd> change octave <b>·</b> <kbd>SPACE</kbd> hold sustain</span></div>
+    <div class="below-keys"><span>Click, touch, or use the letter keys.<br><kbd>CTRL F</kbd> Für Elise <b>·</b> <kbd>CTRL B</kbd> Bach prelude<br>Press the shortcut again or <kbd>ESC</kbd> to stop.</span><span><kbd>←</kbd> <kbd>→</kbd> change octave <b>·</b> <kbd>SPACE</kbd> hold sustain</span></div>
   </section>
   <footer><p><span class="live-dot"></span> Synthesized in your browser</p><details><summary>Inside the piano <span>+</span></summary><p>64 inharmonic partials, softly beating strings, a resonant hammer attack, and a continuous damper model. A TypeScript port of pfsynth, running on the audio thread.</p><p>The tonal parameters were measured from Alexander Holm’s Salamander Grand Piano (CC BY 3.0). The attack parameters were fitted to Pianoteq 6 by Modartt. No recordings are played or distributed. pfsynth is © 2026 John O’Laughlin, MIT licensed.</p></details></footer>
 </main>`;
@@ -57,7 +58,7 @@ function refreshKeys() {
   const sounding = new Set([...held.values()].map(v => v.note));
   document.querySelectorAll<HTMLButtonElement>('.key').forEach(key => {const down = sounding.has(Number(key.dataset.note)); key.classList.toggle('down', down); key.setAttribute('aria-pressed', String(down));});
   $('note').textContent = sounding.size ? [...sounding].map(noteName).join(' · ') : '—';
-  if (node) $('status').textContent = demo.playing ? 'Für Elise · opening' : sounding.size ? (sounding.size > 1 ? 'A little harmony' : 'Let it ring') : 'Ready when you are';
+  if (node) $('status').textContent = demo.playing ? demo.title : sounding.size ? (sounding.size > 1 ? 'A little harmony' : 'Let it ring') : 'Ready when you are';
 }
 function press(source: string, midi: number) {
   if (held.has(source)) return;
@@ -94,9 +95,14 @@ for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) $('key
 $('keyboard').addEventListener('keydown', e => {if (e.key === 'Enter' && !e.repeat) {e.preventDefault(); const key = (e.target as HTMLElement).closest<HTMLButtonElement>('.key'); if (key) press('enter', Number(key.dataset.note));}});
 $('keyboard').addEventListener('keyup', e => {if (e.key === 'Enter') release('enter');});
 window.addEventListener('keydown', e => {
-  if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'f') {
+  if (e.ctrlKey && !e.altKey && !e.metaKey && ['f', 'b'].includes(e.key.toLowerCase())) {
     e.preventDefault();
-    if (!e.repeat) {if (demo.playing) demo.stop(); else void demo.start().catch(fail);}
+    const bach = e.key.toLowerCase() === 'b';
+    const title = bach ? 'Bach · Prelude in C · opening' : 'Für Elise · opening';
+    if (!e.repeat) {
+      if (demo.playing && demo.title === title) demo.stop();
+      else void demo.start(bach ? bachPrelude : furElise, title).catch(fail);
+    }
     return;
   }
   if (e.key === 'Escape' && demo.playing) {e.preventDefault(); demo.stop(); return;}

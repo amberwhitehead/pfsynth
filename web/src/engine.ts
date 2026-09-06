@@ -16,6 +16,18 @@ const TIMES = [0, .015, .04, .09, .2, .45, .9, 1.8, 3.6, 6];
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (x: number, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const db = (x: number) => Math.pow(10, x / 20);
+// pfplayer.c:key_trims, with the native live defaults. Keep the fitted data immutable.
+export function liveAttackPatch(p: AttackPatch, note: number): AttackPatch {
+  const weight = clamp((92 - note) / 10), top = clamp((note - 96) / 6);
+  const f1 = 440 * 2 ** ((note - 69) / 12);
+  const decayScale = Math.fround(1 - top * .75);
+  return {...p,
+    slow_mix: Math.fround(db(-18 * weight)),
+    knock_mix: Math.fround(db(-22 * weight)),
+    noise_mix: Math.fround(p.noise_mix * db(-17 * weight)),
+    mode_t60: p.mode_t60.map((t60, i) => top > 0 && t60 < .5 && p.mode_hz[i] >= .5 * f1 && p.mode_hz[i] < f1 ? Math.fround(t60 * decayScale) : t60),
+  };
+}
 // Register-dependent raised-cosine onset length (pf_onset_seconds): a struck bass string
 // builds over 20-40 ms where a treble note is at full level within ~2 ms.
 const onsetSeconds = (f1: number) => {
@@ -132,6 +144,8 @@ class Attack {
 export class Voice {
   partials: Partial[] = []; attack: Attack; age = 0; held = true; level = 1; damping = 1; segment = -1; onsetS: number;
   pedalPosition = 0; releasedFrames = 0; fading = false; finished = false; fadeLeft = 0;
+  restriking = false; restrikeGain = 1; restrikeRate = 1;
+  restrike() {this.fading = true; this.restriking = true; this.restrikeRate = Math.exp(-1 / (this.sr * .006));}
   fade() {if (!this.fading) {this.fading = true; this.fadeLeft = Math.max(1, Math.round(FADE_SECONDS * this.sr));}}
   constructor(public id: number, public midi: number, velocity: number, public sr: number, patch: Patch, attack: AttackPatch) {
     const key = clamp((midi - 21) / 3, 0, 29), lo = Math.floor(key), hi = Math.min(lo + 1, 29), t = key - lo;
@@ -160,7 +174,7 @@ export class Voice {
       // The physical model retains a -45 dB residual; don't spend CPU on it for 24 seconds.
       if (!this.held && this.pedalPosition < .645) this.releasedFrames++;
       if (this.releasedFrames >= this.sr * .35 || t >= 6) this.fade();
-      if (this.fading && this.fadeLeft <= 0) {this.finished = true; break;}
+      if (this.fading && !this.restriking && this.fadeLeft <= 0) {this.finished = true; break;}
       let segment = 0; while (segment < 8 && t > TIMES[segment + 1]) segment++;
       // Re-anchor every block to avoid accumulated drift; otherwise use exact exponential recurrences.
       if (i === 0 || segment !== this.segment || this.age === Math.floor(6 * this.sr) + 1) {
@@ -170,17 +184,22 @@ export class Voice {
       let sum = 0; for (const p of this.partials) sum += p.next(this.damping);
       sum = Math.fround(sum * (t < this.onsetS ? .5 - .5 * Math.cos(Math.PI * t / this.onsetS) : 1));
       if (t < 2) sum = Math.fround(sum + this.attack.next(this.age, this.sr));
-      if (this.fading) sum *= this.fadeLeft-- / Math.max(1, Math.round(FADE_SECONDS * this.sr));
+      if (this.restriking) {sum = Math.fround(sum * Math.fround(this.restrikeGain)); this.restrikeGain *= this.restrikeRate;}
+      else if (this.fading) sum *= this.fadeLeft-- / Math.max(1, Math.round(FADE_SECONDS * this.sr));
       output[i] += sum; energy += sum * sum;
     }
     this.level = Math.sqrt(energy / output.length);
+    if (this.restriking && this.restrikeGain < 1e-4) this.finished = true;
   }
 }
 export class PianoEngine {
-  voices: Voice[] = []; pedalPosition = 0; limGain = 1;
-  constructor(public sr: number, public patch: Patch, public attack: AttackPatch) {}
+  voices: Voice[] = []; pedalPosition = 0; limGain = 1; limHold = 0;
+  constructor(public sr: number, public patch: Patch, public attack: AttackPatch, public liveTrims = false) {}
   on(id: number, note: number, velocity: number) {
     if (!Number.isInteger(note) || note < 21 || note > 108 || !Number.isFinite(velocity) || velocity <= 0 || velocity > 1) return;
+    // Duplicate MIDI attacks within 5 ms are ignored; a real restrike replaces the old string.
+    for (const v of this.voices) if (v.midi === note && !v.fading && v.age / this.sr < .005) return;
+    for (const v of this.voices) if (v.midi === note && !v.fading) v.restrike();
     // Fade stolen voices instead of cutting an arbitrary waveform mid-cycle.
     let live = 0, candidate: Voice | undefined, lowest = Infinity;
     for (const v of this.voices) {
@@ -195,12 +214,12 @@ export class PianoEngine {
     for (let i = this.voices.length - 1; i >= 0; i--) {
       if (this.voices[i].fading && ++fades > MAX_FADING_VOICES) this.voices.splice(i, 1);
     }
-    const voice = new Voice(id, note, velocity, this.sr, this.patch, this.attack);
+    const voice = new Voice(id, note, velocity, this.sr, this.patch, this.liveTrims ? liveAttackPatch(this.attack, note) : this.attack);
     voice.pedal(this.pedalPosition); this.voices.push(voice);
   }
   off(id: number) { for (const v of this.voices) if (v.id === id) {v.held = false; v.pedal(this.pedalPosition);} }
   sustain(value: number) { if (!Number.isFinite(value)) return; this.pedalPosition = clamp(value); for (const v of this.voices) v.pedal(this.pedalPosition); }
-  panic() { this.voices = []; this.pedalPosition = 0; }
+  panic() { this.voices = []; this.pedalPosition = 0; this.limGain = 1; this.limHold = 0; }
   render(output: Float32Array) {
     output.fill(0);
     for (const v of this.voices) v.render(output);
@@ -220,7 +239,9 @@ export class PianoEngine {
     let peak = 0;
     for (let i = 0; i < output.length; i++) {const a = Math.abs(output[i]) * g; if (a > peak) peak = a;}
     const target = peak > .95 ? .95 / peak : 1, prev = this.limGain;
-    this.limGain = target < prev ? target : prev + (1 - prev) * (1 - Math.exp(-output.length / (this.sr * .25)));
+    if (target < prev) {this.limGain = target; this.limHold = Math.floor(this.sr * .05);}
+    else if (this.limHold > 0) this.limHold -= output.length;
+    else this.limGain = prev + (1 - prev) * (1 - Math.exp(-output.length / (this.sr * .25)));
     for (let i = 0; i < output.length; i++) {
       const lg = i < 32 ? prev + (this.limGain - prev) * (i / 32) : this.limGain;
       const x = output[i] * g * lg;

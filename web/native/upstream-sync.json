@@ -1,0 +1,63 @@
+{
+  "repository": "https://github.com/olaugh/pfsynth",
+  "commit": "3c125864905561b2003e00fe1606c869efe559c3",
+  "files": [
+    {
+      "source": "src/core/pf_partial.c",
+      "sha256": "d5d776fdc824481d491843e604db24f78aa28da91fa6b8eabd9a07a4644ff32c",
+      "copy": "vendor/src/core/pf_partial.c",
+      "wasmSentinel": true
+    },
+    {
+      "source": "src/core/pf_partial.h",
+      "sha256": "24caf7f16c58462e93919a23af050f0824d85b11db47fce0584f7b83f70daf36",
+      "copy": "vendor/src/core/pf_partial.h"
+    },
+    {
+      "source": "src/core/pf_attack.c",
+      "sha256": "450fff22cf231ec0431cb32aa480af320f12ef82d69d40c0fa779fe2296a5b5d",
+      "copy": "vendor/src/core/pf_attack.c"
+    },
+    {
+      "source": "src/core/pf_attack.h",
+      "sha256": "c179caf0b476d234eaa1eabc535956742f05d2e2d3fde293955e2f5048ef3789",
+      "copy": "vendor/src/core/pf_attack.h"
+    },
+    {
+      "source": "experiments/partial-piano-wide/salamander.h",
+      "sha256": "87a9d72d25821feaebf32f946413e0e6ec9dc2d24c039dbc8d07ff1c4161cea3",
+      "copy": "vendor/experiments/partial-piano-wide/salamander.h"
+    },
+    {
+      "source": "experiments/partial-piano-wide/salamander.bin",
+      "sha256": "2ad27c7e580a086e6bf34fd5a86395d5a5e5503905e924a6b2979eceec5e1495",
+      "copy": "public/salamander.bin"
+    },
+    {
+      "source": "experiments/attack-ptq/patch_attack.h",
+      "sha256": "ccdce35c6fe45cfc10b7831481df999825ee7707bb67e01549530ec790e1b02e",
+      "copy": "vendor/experiments/attack-ptq/patch_attack.h"
+    },
+    {
+      "source": "experiments/attack-ptq/attack.json",
+      "sha256": "da756a35056665fd0f33ffc1bf4ca1dbecabb5b9c3f8e03c7f55845d06230622",
+      "copy": "src/attack.json"
+    },
+    {
+      "source": "src/host/pfplayer.c",
+      "sha256": "ab16201d21ea431a0525c6ade9ebc4b3d378b5b6d8e52cf1afc089e38ea165a5"
+    },
+    {
+      "source": "src/host/pfplayer.h",
+      "sha256": "89b6453e3fc19c7fcc42fe3633b5d6e6c290a9a65b6ca08aefde42418763605d"
+    },
+    {
+      "source": "src/host/pfwasm.c",
+      "sha256": "4ffbe918a3547376ed4a6af018dc555dedaf54d13ab91e08a2a7dd8224385eed"
+    },
+    {
+      "source": "experiments/attack-ptq/listening-trims.json",
+      "sha256": "c6f5523c18b1f7b46d569925bc7b6da53b3ea32d8f5407b8bae230f23bbc9ca8"
+    }
+  ]
+}
