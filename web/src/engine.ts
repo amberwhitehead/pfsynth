@@ -6,6 +6,10 @@ export interface AttackPatch {
   noise_ms: number[][]; noise_hz: number[][]; thump_mix: number; noise_mix: number;
 }
 const TAU = 2 * Math.PI;
+const DAMP_FLOOR = 10 ** (-45 / 20);
+export const MAX_VOICES = 12;
+const MAX_FADING_VOICES = 2;
+const FADE_SECONDS = .04;
 const TIMES = [0, .015, .04, .09, .2, .45, .9, 1.8, 3.6, 6];
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (x: number, a = 0, b = 1) => Math.min(b, Math.max(a, x));
@@ -28,7 +32,7 @@ export class Patch {
 }
 class Partial {
   amplitudes: number[] = [];
-  re: number[] = []; im: number[] = []; cr: number[] = []; ci: number[] = [];
+  re0 = 0; im0 = 0; cr0 = 0; ci0 = 0; re1 = 0; im1 = 0; cr1 = 0; ci1 = 0;
   amp = 0; ratio = 1; damp = 1;
   constructor(patch: Patch, sr: number, midi: number, velocity: number, k: number, f: number, lo: number, hi: number, t: number, vel: number, extra: number) {
     for (let j = 0; j < 10; j++) {
@@ -42,8 +46,8 @@ class Partial {
       let offset = (u ? 1 : -1) * (.045 + .00032 * f);
       if (midi < 40) offset *= .3;
       const w = TAU * (f + offset) / sr;
-      this.re.push(Math.cos(phase)); this.im.push(Math.sin(phase));
-      this.cr.push(Math.cos(w)); this.ci.push(Math.sin(w));
+      if (u === 0) {this.re0 = Math.cos(phase); this.im0 = Math.sin(phase); this.cr0 = Math.cos(w); this.ci0 = Math.sin(w);}
+      else {this.re1 = Math.cos(phase); this.im1 = Math.sin(phase); this.cr1 = Math.cos(w); this.ci1 = Math.sin(w);}
     }
   }
   envelopeAt(t: number, segment: number, sr: number) {
@@ -58,15 +62,15 @@ class Partial {
     }
   }
   next(damping: number) {
-    let sum = 0;
-    for (let u = 0; u < 2; u++) {
-      const re = this.re[u], im = this.im[u]; sum += re * (u ? .25 : .75);
-      this.re[u] = re * this.cr[u] - im * this.ci[u];
-      this.im[u] = re * this.ci[u] + im * this.cr[u];
-    }
+    const re0 = this.re0, im0 = this.im0, re1 = this.re1, im1 = this.im1;
+    const sum = re0 * .75 + re1 * .25;
+    this.re0 = re0 * this.cr0 - im0 * this.ci0;
+    this.im0 = re0 * this.ci0 + im0 * this.cr0;
+    this.re1 = re1 * this.cr1 - im1 * this.ci1;
+    this.im1 = re1 * this.ci1 + im1 * this.cr1;
     const out = sum * this.amp * this.damp;
     this.amp *= this.ratio;
-    if (this.damp > db(-45)) this.damp *= damping;
+    if (this.damp > DAMP_FLOOR) this.damp *= damping;
     return out;
   }
 }
@@ -112,6 +116,8 @@ class Attack {
 }
 export class Voice {
   partials: Partial[] = []; attack: Attack; age = 0; held = true; level = 1; damping = 1; segment = -1;
+  pedalPosition = 0; releasedFrames = 0; fading = false; finished = false; fadeLeft = 0;
+  fade() {if (!this.fading) {this.fading = true; this.fadeLeft = Math.max(1, Math.round(FADE_SECONDS * this.sr));}}
   constructor(public id: number, public midi: number, velocity: number, public sr: number, patch: Patch, attack: AttackPatch) {
     const key = clamp((midi - 24) / 6, 0, 14), lo = Math.floor(key), hi = Math.min(lo + 1, 14), t = key - lo;
     const vel = clamp((velocity * 127 - 48) / 52);
@@ -126,6 +132,8 @@ export class Voice {
     this.attack = new Attack(attack, sr, midi, velocity);
   }
   pedal(position: number) {
+    this.pedalPosition = position;
+    if (position >= .645) this.releasedFrames = 0;
     const engagement = this.held || this.midi >= 90 ? 0 : clamp((Math.fround(.645) - position) / (Math.fround(.645) - Math.fround(.472))) ** Math.fround(.95);
     this.damping = Math.exp(-engagement * 80 / 8.685889638 / this.sr);
   }
@@ -133,6 +141,10 @@ export class Voice {
     let energy = 0;
     for (let i = 0; i < output.length; i++, this.age++) {
       const t = this.age / this.sr;
+      // The physical model retains a -45 dB residual; don't spend CPU on it for 24 seconds.
+      if (!this.held && this.pedalPosition < .645) this.releasedFrames++;
+      if (this.releasedFrames >= this.sr * .35 || t >= 6) this.fade();
+      if (this.fading && this.fadeLeft <= 0) {this.finished = true; break;}
       let segment = 0; while (segment < 8 && t > TIMES[segment + 1]) segment++;
       // Re-anchor every block to avoid accumulated drift; otherwise use exact exponential recurrences.
       if (i === 0 || segment !== this.segment || this.age === Math.floor(6 * this.sr) + 1) {
@@ -142,20 +154,30 @@ export class Voice {
       let sum = 0; for (const p of this.partials) sum += p.next(this.damping);
       sum = Math.fround(sum * (t < .004 ? .5 - .5 * Math.cos(Math.PI * t / .004) : 1));
       if (t < 2) sum = Math.fround(sum + this.attack.next(this.age, this.sr));
+      if (this.fading) sum *= this.fadeLeft-- / Math.max(1, Math.round(FADE_SECONDS * this.sr));
       output[i] += sum; energy += sum * sum;
     }
     this.level = Math.sqrt(energy / output.length);
   }
 }
 export class PianoEngine {
-  voices: Voice[] = []; pedalPosition = 0;
+  voices: Voice[] = []; pedalPosition = 0; peakEnv = 0;
   constructor(public sr: number, public patch: Patch, public attack: AttackPatch) {}
   on(id: number, note: number, velocity: number) {
     if (!Number.isInteger(note) || note < 24 || note > 108 || !Number.isFinite(velocity) || velocity <= 0 || velocity > 1) return;
-    if (this.voices.length >= 24) {
-      let index = 0, lowest = Infinity;
-      this.voices.forEach((v, i) => {const score = v.level + (v.held ? 10 : 0); if (score < lowest) {lowest = score; index = i;}});
-      this.voices.splice(index, 1);
+    // Fade stolen voices instead of cutting an arbitrary waveform mid-cycle.
+    let live = 0, candidate: Voice | undefined, lowest = Infinity;
+    for (const v of this.voices) {
+      if (v.fading) continue;
+      live++;
+      const score = v.level + (v.held ? 10 : 0);
+      if (score < lowest) {lowest = score; candidate = v;}
+    }
+    if (live >= MAX_VOICES) candidate?.fade();
+    // Bound overlapping steal fades during unusually dense message bursts.
+    let fades = 0;
+    for (let i = this.voices.length - 1; i >= 0; i--) {
+      if (this.voices[i].fading && ++fades > MAX_FADING_VOICES) this.voices.splice(i, 1);
     }
     const voice = new Voice(id, note, velocity, this.sr, this.patch, this.attack);
     voice.pedal(this.pedalPosition); this.voices.push(voice);
@@ -166,7 +188,23 @@ export class PianoEngine {
   render(output: Float32Array) {
     output.fill(0);
     for (const v of this.voices) v.render(output);
-    this.voices = this.voices.filter(v => !(v.age / this.sr > .5 && v.level < 1e-6) && v.age / this.sr < 24);
-    for (let i = 0; i < output.length; i++) output[i] = Math.tanh(output[i] * 3);
+    // Compact in place: no new array on every audio callback.
+    let kept = 0;
+    for (const v of this.voices) {
+      if (v.finished) continue;
+      if (!v.fading && v.age / this.sr > .5 && v.level < 1e-5) v.fade();
+      this.voices[kept++] = v;
+    }
+    this.voices.length = kept;
+    // Master: makeup into a limiter, then the tanh safety. Several ff voices sum past
+    // full scale, which slammed the tanh into square-wave buzz on chords; track the
+    // peak (instant attack, slow release) and undo only the excess, so a single note
+    // reaches the tanh exactly as before while polyphony gets pulled back transparently.
+    const release = Math.exp(-1 / (.13 * this.sr));
+    for (let i = 0; i < output.length; i++) {
+      const x = output[i] * 3, peak = Math.abs(x);
+      this.peakEnv = peak > this.peakEnv ? peak : this.peakEnv * release + peak * (1 - release);
+      output[i] = Math.tanh(x * (this.peakEnv > 1 ? 1 / this.peakEnv : 1));
+    }
   }
 }

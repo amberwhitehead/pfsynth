@@ -61,3 +61,37 @@ Tonal parameters measured from Alexander Holm's Salamander Grand Piano
 (CC BY 3.0); attack parameters fitted to Pianoteq 6 (Modartt).
 No third-party recordings are redistributed. The original pfsynth source is
 preserved outside this demo directory.
+
+## Performance update
+
+The browser host now budgets 12 active voices plus at most two short steal fades.
+Released notes fade out after 350 ms without sustain; retirement fades last 40 ms.
+Sustained/held voices have a six-second lifetime, also ending with a fade.
+This prevents the original damper's quiet residual from consuming the audio
+thread for 24 seconds. The partial oscillator loop uses scalar state and the
+voice list compacts in place. Tone parity tests cover the initial 550 ms;
+separate regression tests cover the intentionally shorter tails.
+
+## How the web part fits together
+
+- `src/main.ts` builds the keyboard and handles mouse, touch, and key events.
+  Enable sound creates an `AudioContext` after a user gesture. Each pressed
+  key gets an ID so its release stops the right voice. Sliders keep accepting
+  note shortcuts while focused; their arrow keys still adjust their values.
+- `src/piano-worklet.ts` receives note-on, note-off, sustain, and panic messages
+  on the audio thread. It asks `src/engine.ts` to fill each audio block.
+- The output passes through a volume gain and an analyser to the speakers.
+  The analyser supplies the little waveform display; drawing runs separately
+  from audio synthesis.
+- `src/fur-elise.ts` contains a short arrangement of Beethoven's opening and
+  a cancellable timer-based player. **Ctrl+F** enables audio and starts it;
+  Ctrl+F again or Escape stops it. This shortcut replaces browser Find while
+  the page has focus. Notes use the same engine and key highlights as manual
+  playing. Switching away cancels playback and releases every note.
+- `npm run build` checks TypeScript, runs Vite, then runs `single-file.mjs`.
+  That last step embeds the worklet, parameter data, scripts, styles, and
+  license in `dist/index.html`. Only that HTML file needs deploying.
+
+Use `npm run dev` while editing and `npm test` to check synthesis and voice
+cleanup. The current voice limits are in **Performance update** above; the
+earlier Audio section describes the original, longer-lived voice settings.
