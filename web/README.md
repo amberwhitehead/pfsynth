@@ -138,3 +138,16 @@ the variations, switching behavior, output bounds, cleanup and patch immutabilit
 Glass was subsequently softened: partial stretching is about one third of
 the initial amount, brightness is +1 dB per octave of partial index, envelope
 lengthening is 1.35×, and release grace is 600 ms. Its level remains unchanged.
+
+## Concert D
+
+Concert D uses the author's separate `pianoteq.bin` tonal fit, measured from
+Pianoteq 6's “Steinway D Close Mic Classical” model. Its tuning, inharmonicity,
+partial envelopes and velocity layers are distinct from the original
+Salamander-derived piano. It uses the same per-key live attack trims, limiter,
+and browser voice budget, with no added effect processing. It is a fitted
+synthesis approximation, not a Steinway recording or the Pianoteq engine.
+
+Both tonal parameter sets are embedded in the single-file build. Selecting a
+sound changes subsequent notes, including demo-song notes; existing notes
+retain the tone they started with. Original remains the default.

@@ -26,5 +26,5 @@ html = html.replace('<html ', `<!--\n${license.replaceAll('--', '—')}\n-->\n<h
 // Remove only generated Vite artifacts, after the standalone file is complete.
 await fs.writeFile(new URL('index.html', root), html);
 for (const entry of await fs.readdir(root)) if (entry !== 'index.html') await fs.rm(new URL(entry, root), {recursive: true});
-if (html.includes('/assets/') || html.includes('/salamander.bin') || html.includes('/pianoteq.bin') || html.includes('/LICENSE.txt')) throw new Error('Unresolved runtime asset reference');
+if (html.includes('/assets/') || ['salamander.bin', 'pianoteq.bin', 'LICENSE.txt'].some(file => html.includes(JSON.stringify('/' + file)))) throw new Error('Unresolved runtime asset reference');
 console.log(`Single-file deployment: ${path.resolve('dist/index.html')} (${Buffer.byteLength(html).toLocaleString()} bytes)`);
