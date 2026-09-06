@@ -12,7 +12,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div class="keyboard-wrap"><div id="keyboard" class="keyboard" role="group" aria-label="Piano keys"></div></div>
     <div class="below-keys"><span>Click, touch, or use the letter keys.</span><span><kbd>←</kbd> <kbd>→</kbd> change octave <b>·</b> <kbd>SPACE</kbd> hold sustain</span></div>
   </section>
-  <footer><p><span class="live-dot"></span> Synthesized in your browser</p><details><summary>Inside the piano <span>+</span></summary><p>64 inharmonic partials, softly beating strings, a resonant hammer attack, and a continuous damper model. A TypeScript port of pfsynth, running on the audio thread.</p><p>The tonal parameters were measured from Alexander Holm’s Salamander Grand Piano (CC BY 3.0). The attack parameters were fitted to Pianoteq 6 by Modartt. No recordings are played or distributed. <a href="/LICENSE.txt">pfsynth · MIT license</a></p></details></footer>
+  <footer><p><span class="live-dot"></span> Synthesized in your browser</p><details><summary>Inside the piano <span>+</span></summary><p>64 inharmonic partials, softly beating strings, a resonant hammer attack, and a continuous damper model. A TypeScript port of pfsynth, running on the audio thread.</p><p>The tonal parameters were measured from Alexander Holm’s Salamander Grand Piano (CC BY 3.0). The attack parameters were fitted to Pianoteq 6 by Modartt. No recordings are played or distributed. pfsynth is © 2026 John O’Laughlin, MIT licensed.</p></details></footer>
 </main>`;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 let octave = 4, nextId = 1, pedalLatched = false, spaceHeld = false;

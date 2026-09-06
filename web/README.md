@@ -15,6 +15,14 @@ Touch sets strike velocity. Volume changes output gain. Leaving the page release
 for AudioWorklet support. Node 22.18+ is recommended for Vite; the parity test
 uses Node's `--experimental-transform-types` support (tested with Node 24).
 
+### Single-file deployment
+
+The production build emits only `dist/index.html`. JavaScript, CSS, the audio
+worklet, the fitted piano parameters, and the MIT license are embedded in it.
+It uses system fonts and makes no external asset requests. Upload that one
+file to a static HTTPS host. Vite's development server retains separate source
+modules for hot reload; `single-file.mjs` bundles the deployment after Vite builds.
+
 ## Audio
 
 `src/engine.ts` ports `pf_partial.c` and `pf_attack.c`. It retains all 64

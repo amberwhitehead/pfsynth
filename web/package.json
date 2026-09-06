@@ -1,1 +1,17 @@
-{"name":"pfsynth-little-piano","version":"1.0.0","private":true,"type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"tsc --noEmit && vite build","preview":"vite preview --host 0.0.0.0","build:reference":"bash native/build.sh","test":"node --experimental-transform-types native/test.mjs"},"devDependencies":{"typescript":"^7.0.2","vite":"^7.1.0"}}
+{
+  "name": "pfsynth-little-piano",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build && node single-file.mjs",
+    "preview": "vite preview --host 0.0.0.0",
+    "build:reference": "bash native/build.sh",
+    "test": "node --experimental-transform-types native/test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^7.1.0"
+  }
+}
