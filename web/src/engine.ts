@@ -1,5 +1,6 @@
 // Browser port of pfsynth/src/core/pf_partial.c and pf_attack.c (MIT).
 // The fitted patch contains parameters, not recorded audio.
+import {sounds, isSound, type Sound, type SoundProfile} from './presets.ts';
 export interface AttackPatch {
   mode_hz: number[]; mode_t60: number[]; mode_db: number[]; mode_delay_ms: number[];
   mode_db_key: number[][];
@@ -54,17 +55,27 @@ class Partial {
   amplitudes: number[] = [];
   re0 = 0; im0 = 0; cr0 = 0; ci0 = 0; re1 = 0; im1 = 0; cr1 = 0; ci1 = 0;
   amp = 0; ratio = 1; damp = 1;
-  constructor(patch: Patch, sr: number, midi: number, velocity: number, k: number, f: number, lo: number, hi: number, t: number, vel: number, extra: number) {
+  constructor(patch: Patch, sr: number, midi: number, velocity: number, k: number, f: number, lo: number, hi: number, t: number, vel: number, extra: number, profile: SoundProfile = sounds.original) {
     for (let j = 0; j < 10; j++) {
       const a = mix(patch.envelope(lo, 0, k, j), patch.envelope(lo, 1, k, j), vel);
       const b = mix(patch.envelope(hi, 0, k, j), patch.envelope(hi, 1, k, j), vel);
       this.amplitudes.push(db(mix(a, b, t) * .5 - 120) * extra);
+    }
+    if (profile !== sounds.original) {
+      const measured = this.amplitudes;
+      const gain = profile.gain * db(Math.min(8, profile.tilt * Math.log2(k + 1)));
+      this.amplitudes = TIMES.map(time => {
+        const at = time <= .09 ? time : .09 + (time - .09) / profile.decay;
+        let j = 0; while (j < 8 && at > TIMES[j + 1]) j++;
+        return measured[j] * (measured[j + 1] / measured[j]) ** ((at - TIMES[j]) / (TIMES[j + 1] - TIMES[j])) * gain;
+      });
     }
     const anchor = t < .5 ? lo : hi, layer = vel < .5 ? 0 : 1;
     const phase = patch.phases[(anchor * 2 + layer) * 64 + k] * TAU / 256;
     for (let u = 0; u < 2; u++) {
       let offset = (u ? 1 : -1) * (.045 + .00032 * f);
       if (midi < 40) offset *= .3;
+      if (profile.spread) offset = f * (2 ** ((u ? 1 : -1) * profile.spread / 1200) - 1);
       const w = TAU * (f + offset) / sr;
       if (u === 0) {this.re0 = Math.cos(phase); this.im0 = Math.sin(phase); this.cr0 = Math.cos(w); this.ci0 = Math.sin(w);}
       else {this.re1 = Math.cos(phase); this.im1 = Math.sin(phase); this.cr1 = Math.cos(w); this.ci1 = Math.sin(w);}
@@ -145,19 +156,22 @@ export class Voice {
   partials: Partial[] = []; attack: Attack; age = 0; held = true; level = 1; damping = 1; segment = -1; onsetS: number;
   pedalPosition = 0; releasedFrames = 0; fading = false; finished = false; fadeLeft = 0;
   restriking = false; restrikeGain = 1; restrikeRate = 1;
+  attackGain = 1; releaseSeconds = .35;
   restrike() {this.fading = true; this.restriking = true; this.restrikeRate = Math.exp(-1 / (this.sr * .006));}
   fade() {if (!this.fading) {this.fading = true; this.fadeLeft = Math.max(1, Math.round(FADE_SECONDS * this.sr));}}
-  constructor(public id: number, public midi: number, velocity: number, public sr: number, patch: Patch, attack: AttackPatch) {
+  constructor(public id: number, public midi: number, velocity: number, public sr: number, patch: Patch, attack: AttackPatch, public sound: Sound = 'original') {
+    const profile = sounds[sound];
+    this.attackGain = profile.attack; this.releaseSeconds = profile.release;
     const key = clamp((midi - 21) / 3, 0, 29), lo = Math.floor(key), hi = Math.min(lo + 1, 29), t = key - lo;
     const vel = clamp((velocity * 127 - 48) / 52);
     const extra = velocity * 127 < 48 ? (velocity * 127 / 48) ** 1.5 : velocity * 127 > 100 ? (velocity * 127 / 100) ** 1.3 : 1;
-    const f1 = 440 * 2 ** ((midi - 69) / 12) * mix(patch.tuning[lo * 2], patch.tuning[hi * 2], t);
-    this.onsetS = onsetSeconds(f1);
+    const f1 = 440 * 2 ** ((midi - 69) / 12) * mix(patch.tuning[lo * 2], patch.tuning[hi * 2], t) * 2 ** (Math.sin(midi * 12.9898) * profile.drift / 1200);
+    this.onsetS = onsetSeconds(f1) * profile.onset;
     const B = Math.exp(mix(Math.log(patch.tuning[lo * 2 + 1]), Math.log(patch.tuning[hi * 2 + 1]), t));
     for (let k = 0; k < 64; k++) {
-      const h = k + 1, f = f1 * h * Math.sqrt((1 + B * h * h) / (1 + B));
+      const h = k + 1, f = profile.glass ? f1 * (h + .035 * (h - 1) ** 1.5) : f1 * h * Math.sqrt((1 + B * h * h) / (1 + B));
       if (f > sr * .44) break;
-      this.partials.push(new Partial(patch, sr, midi, velocity, k, f, lo, hi, t, vel, extra));
+      this.partials.push(new Partial(patch, sr, midi, velocity, k, f, lo, hi, t, vel, extra, profile));
     }
     this.attack = new Attack(attack, sr, midi, velocity);
   }
@@ -173,7 +187,7 @@ export class Voice {
       const t = this.age / this.sr;
       // The physical model retains a -45 dB residual; don't spend CPU on it for 24 seconds.
       if (!this.held && this.pedalPosition < .645) this.releasedFrames++;
-      if (this.releasedFrames >= this.sr * .35 || t >= 6) this.fade();
+      if (this.releasedFrames >= this.sr * this.releaseSeconds || t >= 6) this.fade();
       if (this.fading && !this.restriking && this.fadeLeft <= 0) {this.finished = true; break;}
       let segment = 0; while (segment < 8 && t > TIMES[segment + 1]) segment++;
       // Re-anchor every block to avoid accumulated drift; otherwise use exact exponential recurrences.
@@ -183,7 +197,7 @@ export class Voice {
       }
       let sum = 0; for (const p of this.partials) sum += p.next(this.damping);
       sum = Math.fround(sum * (t < this.onsetS ? .5 - .5 * Math.cos(Math.PI * t / this.onsetS) : 1));
-      if (t < 2) sum = Math.fround(sum + this.attack.next(this.age, this.sr));
+      if (t < 2) sum = Math.fround(sum + this.attack.next(this.age, this.sr) * this.attackGain);
       if (this.restriking) {sum = Math.fround(sum * Math.fround(this.restrikeGain)); this.restrikeGain *= this.restrikeRate;}
       else if (this.fading) sum *= this.fadeLeft-- / Math.max(1, Math.round(FADE_SECONDS * this.sr));
       output[i] += sum; energy += sum * sum;
@@ -194,6 +208,8 @@ export class Voice {
 }
 export class PianoEngine {
   voices: Voice[] = []; pedalPosition = 0; limGain = 1; limHold = 0;
+  sound: Sound = 'original';
+  setSound(value: unknown) {if (isSound(value)) this.sound = value;}
   constructor(public sr: number, public patch: Patch, public attack: AttackPatch, public liveTrims = false) {}
   on(id: number, note: number, velocity: number) {
     if (!Number.isInteger(note) || note < 21 || note > 108 || !Number.isFinite(velocity) || velocity <= 0 || velocity > 1) return;
@@ -214,7 +230,7 @@ export class PianoEngine {
     for (let i = this.voices.length - 1; i >= 0; i--) {
       if (this.voices[i].fading && ++fades > MAX_FADING_VOICES) this.voices.splice(i, 1);
     }
-    const voice = new Voice(id, note, velocity, this.sr, this.patch, this.liveTrims ? liveAttackPatch(this.attack, note) : this.attack);
+    const voice = new Voice(id, note, velocity, this.sr, this.patch, this.liveTrims ? liveAttackPatch(this.attack, note) : this.attack, this.sound);
     voice.pedal(this.pedalPosition); this.voices.push(voice);
   }
   off(id: number) { for (const v of this.voices) if (v.id === id) {v.held = false; v.pedal(this.pedalPosition);} }

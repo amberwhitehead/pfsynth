@@ -13,6 +13,7 @@ class PianoProcessor extends AudioWorkletProcessor {
       if (data.type === 'off') this.engine.off(data.id);
       if (data.type === 'sustain') this.engine.sustain(data.value);
       if (data.type === 'panic') this.engine.panic();
+      if (data.type === 'sound') this.engine.setSound(data.value);
     };
   }
   process(_inputs: Float32Array[][], outputs: Float32Array[][]) {

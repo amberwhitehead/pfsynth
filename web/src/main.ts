@@ -3,6 +3,7 @@ import workletURL from './piano-worklet.ts?worker&url';
 import attackData from './attack.json';
 import {ScorePlayer, furElise} from './fur-elise';
 import {bachPrelude} from './bach-prelude';
+import {sounds, isSound} from './presets';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <main>
@@ -10,6 +11,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <section class="instrument" aria-label="Piano">
     <div class="instrument-top"><div><p class="eyebrow">A MOMENT AT THE KEYS</p><h1>Just play.</h1><p class="intro">A little piano. Room for whatever comes next.</p></div><button id="audio" class="start">Enable sound <span>↗</span></button></div>
     <div class="display"><div class="readout"><span id="status" role="status">Sound is off</span><strong id="note">—</strong></div><canvas id="scope" aria-hidden="true"></canvas><span class="display-label">pfsynth<br>PARTIAL PIANO</span></div>
+    <div class="sound-row"><div id="sounds" role="group" aria-label="Piano sound">${Object.entries(sounds).map(([id, sound]) => `<button type="button" data-sound="${id}" aria-pressed="${id === 'original'}">${sound.label}</button>`).join('')}</div><span id="sound-description">${sounds.original.description}</span></div>
     <div class="controls"><div class="octave"><span class="label">Octave</span><button id="lower" aria-label="Lower octave">−</button><output id="octave">4</output><button id="higher" aria-label="Higher octave">+</button></div><label class="range">Touch <input id="velocity" type="range" min="20" max="127" value="80"><output id="velocity-value">80</output></label><label class="range">Volume <input id="volume" type="range" min="0" max="100" value="65"></label><button id="sustain" aria-pressed="false"><i></i>Sustain <kbd>SPACE</kbd></button></div>
     <div class="keyboard-wrap"><div id="keyboard" class="keyboard" role="group" aria-label="Piano keys"></div></div>
     <div class="below-keys"><span>Click, touch, or use the letter keys.<br><kbd>CTRL F</kbd> Für Elise <b>·</b> <kbd>CTRL B</kbd> Bach prelude<br>Press the shortcut again or <kbd>ESC</kbd> to stop.</span><span><kbd>←</kbd> <kbd>→</kbd> change octave <b>·</b> <kbd>SPACE</kbd> hold sustain</span></div>
@@ -20,6 +22,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 let octave = 4, nextId = 1, pedalLatched = false, spaceHeld = false;
 let context: AudioContext | null = null, node: AudioWorkletNode | null = null, volume: GainNode, analyser: AnalyserNode;
 let initializing: Promise<void> | null = null;
+let selectedSound: keyof typeof sounds = 'original';
 const held = new Map<string, {id: number; note: number}>();
 const mapping = ['a','w','s','e','d','f','t','g','y','h','u','j','k','o','l','p',';'];
 const names = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
@@ -45,6 +48,7 @@ async function enable() {
     const patch = await patchPromise.catch(async () => {const r = await fetch('/salamander.bin'); if (!r.ok) throw new Error('Piano data could not load'); return r.arrayBuffer();});
     await context.audioWorklet.addModule(workletURL);
     node = new AudioWorkletNode(context, 'pfsynth-piano', {numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: {patch, attack: attackData}});
+    node.port.postMessage({type: 'sound', value: selectedSound});
     node.onprocessorerror = () => {panic(); node?.disconnect(); node = null; void context?.close(); context = null; fail(new Error('Audio stopped. Enable sound to restart.'));};
     volume = context.createGain(); volume.gain.value = Number($<HTMLInputElement>('volume').value) / 100;
     analyser = context.createAnalyser(); analyser.fftSize = 2048;
@@ -81,6 +85,14 @@ function drawKeyboard() {
 }
 function changeOctave(delta: number) {panic(); octave = Math.min(6, Math.max(1, octave + delta)); drawKeyboard();}
 $('audio').addEventListener('click', () => void enable().catch(fail));
+$('sounds').addEventListener('click', e => {
+  const value = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-sound]')?.dataset.sound;
+  if (!isSound(value)) return;
+  selectedSound = value;
+  node?.port.postMessage({type: 'sound', value});
+  $('sounds').querySelectorAll<HTMLButtonElement>('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.sound === value)));
+  $('sound-description').textContent = sounds[value].description;
+});
 $('lower').addEventListener('click', () => changeOctave(-1)); $('higher').addEventListener('click', () => changeOctave(1));
 $('sustain').addEventListener('click', () => {pedalLatched = !pedalLatched; syncPedal();});
 $('volume').addEventListener('input', () => {if (context && volume) volume.gain.setTargetAtTime(Number($<HTMLInputElement>('volume').value) / 100, context.currentTime, .02);});

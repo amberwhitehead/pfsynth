@@ -116,3 +116,21 @@ current patch has 30 anchors spanning A0–C8. Live attack trims vary by note.
 pattern. Both songs use the same cancellable `ScorePlayer`, audio engine, and
 key highlights. Ctrl+B takes precedence over the browser shortcut while the
 page has focus, including when a slider is focused.
+
+## Piano sounds
+
+The sound buttons select **Original**, **Felt**, **Honky-tonk**, or **Glass**.
+Selection affects the next notes, including demo playback; held notes finish
+with their existing sound. Original retains the upstream-parity DSP path.
+
+`src/presets.ts` defines the variations. Felt darkens upper partials, softens
+the onset and reduces hammer noise. Honky-tonk spreads the two strings by
+±7 cents and adds deterministic per-key tuning drift. Glass stretches partial
+frequencies into bell-like ratios, brightens and lengthens their envelopes,
+and reduces the hammer component. Glass has an 800 ms release grace; the
+other sounds retain 350 ms. All retain the 12-voice budget and six-second cap.
+These are creative transformations of the measured piano, not new fitted
+instrument models. They add no samples, oscillator banks, or external assets.
+
+Run `node --experimental-transform-types native/presets-test.mjs` to check
+the variations, switching behavior, output bounds, cleanup and patch immutability.
