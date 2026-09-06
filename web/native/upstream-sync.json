@@ -58,6 +58,16 @@
     {
       "source": "experiments/attack-ptq/listening-trims.json",
       "sha256": "c6f5523c18b1f7b46d569925bc7b6da53b3ea32d8f5407b8bae230f23bbc9ca8"
+    },
+    {
+      "source": "experiments/partial-piano-wide/pianoteq.bin",
+      "sha256": "fbd6a337c8cc9effb90b8a58c53428e51869a1b58cfcf0299a049cf998078b46",
+      "copy": "public/pianoteq.bin"
+    },
+    {
+      "source": "experiments/partial-piano-wide/pianoteq.h",
+      "sha256": "98a7b9ebd1d4c84401ebc1050fb85ba790458fb13a02758581f89622afe029a7",
+      "copy": "vendor/experiments/partial-piano-wide/pianoteq.h"
     }
   ]
 }

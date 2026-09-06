@@ -4,10 +4,10 @@ declare class AudioWorkletProcessor {port: MessagePort; constructor(options?: un
 declare function registerProcessor(name: string, processor: typeof AudioWorkletProcessor): void;
 class PianoProcessor extends AudioWorkletProcessor {
   engine: PianoEngine;
-  constructor(options: {processorOptions: {patch: ArrayBuffer; attack: AttackPatch}}) {
+  constructor(options: {processorOptions: {patch: ArrayBuffer; concertPatch: ArrayBuffer; attack: AttackPatch}}) {
     super();
     // Per-key live trims are applied at note-on, as in pfplayer.c:key_trims.
-    this.engine = new PianoEngine(sampleRate, new Patch(options.processorOptions.patch), options.processorOptions.attack, true);
+    this.engine = new PianoEngine(sampleRate, new Patch(options.processorOptions.patch), options.processorOptions.attack, true, new Patch(options.processorOptions.concertPatch));
     this.port.onmessage = ({data}) => {
       if (data.type === 'on') this.engine.on(data.id, data.note, data.velocity);
       if (data.type === 'off') this.engine.off(data.id);

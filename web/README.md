@@ -134,3 +134,7 @@ instrument models. They add no samples, oscillator banks, or external assets.
 
 Run `node --experimental-transform-types native/presets-test.mjs` to check
 the variations, switching behavior, output bounds, cleanup and patch immutability.
+
+Glass was subsequently softened: partial stretching is about one third of
+the initial amount, brightness is +1 dB per octave of partial index, envelope
+lengthening is 1.35×, and release grace is 600 ms. Its level remains unchanged.

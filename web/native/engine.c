@@ -1,6 +1,7 @@
 #include "../vendor/src/core/pf_partial.h"
 #include "../vendor/src/core/pf_attack.h"
 #include "../vendor/experiments/partial-piano-wide/salamander.h"
+#include "../vendor/experiments/partial-piano-wide/pianoteq.h"
 #include "../vendor/experiments/attack-ptq/patch_attack.h"
 #include <math.h>
 #include <string.h>
@@ -12,6 +13,8 @@ static double sr=48000, pedal=0, lim_gain=1;
 static pf_pedal_params params;
 static long lim_hold=0;
 static int live_trims=0;
+static int concert_tone=0;
+void set_tone(int enabled){concert_tone=enabled;}
 void set_live(int enabled){live_trims=enabled;}
 void *memset(void *p,int c,size_t n){unsigned char *b=p;while(n--)*b++=c;return p;}
 void *memcpy(void *dst,const void *src,size_t n){unsigned char *d=dst;const unsigned char *s=src;while(n--)*d++=*s++;return dst;}
@@ -39,7 +42,7 @@ void on(int id,int midi,double velocity){
  int best=0;double score=1e9;
  for(int i=0;i<VOICES;i++){if(!voices[i].used){best=i;break;}double s=voices[i].level+(voices[i].held?10:0);if(s<score){score=s;best=i;}}
  Voice *v=&voices[best];memset(v,0,sizeof *v);v->used=1;v->held=1;v->id=id;v->note=midi;v->level=1;
- pf_partial_init2(&v->p,&pf_partial_salamander,sr,midi,velocity,&params,0);
+ pf_partial_init2(&v->p,concert_tone?&pf_partial_pianoteq:&pf_partial_salamander,sr,midi,velocity,&params,0);
  pf_partial_pedal(&v->p,pedal);pf_attack_patch ap=pf_attack_experiment;if(live_trims)key_trims(midi,&ap);pf_attack_init(&v->a,&ap,sr,midi,velocity);
 }
 float *render(void){

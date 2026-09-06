@@ -61,7 +61,7 @@ class Partial {
       const b = mix(patch.envelope(hi, 0, k, j), patch.envelope(hi, 1, k, j), vel);
       this.amplitudes.push(db(mix(a, b, t) * .5 - 120) * extra);
     }
-    if (profile !== sounds.original) {
+    if (profile.tilt !== 0 || profile.gain !== 1 || profile.decay !== 1) {
       const measured = this.amplitudes;
       const gain = profile.gain * db(Math.min(8, profile.tilt * Math.log2(k + 1)));
       this.amplitudes = TIMES.map(time => {
@@ -169,7 +169,7 @@ export class Voice {
     this.onsetS = onsetSeconds(f1) * profile.onset;
     const B = Math.exp(mix(Math.log(patch.tuning[lo * 2 + 1]), Math.log(patch.tuning[hi * 2 + 1]), t));
     for (let k = 0; k < 64; k++) {
-      const h = k + 1, f = profile.glass ? f1 * (h + .035 * (h - 1) ** 1.5) : f1 * h * Math.sqrt((1 + B * h * h) / (1 + B));
+      const h = k + 1, f = profile.glass ? f1 * (h + .012 * (h - 1) ** 1.5) : f1 * h * Math.sqrt((1 + B * h * h) / (1 + B));
       if (f > sr * .44) break;
       this.partials.push(new Partial(patch, sr, midi, velocity, k, f, lo, hi, t, vel, extra, profile));
     }
@@ -209,8 +209,8 @@ export class Voice {
 export class PianoEngine {
   voices: Voice[] = []; pedalPosition = 0; limGain = 1; limHold = 0;
   sound: Sound = 'original';
-  setSound(value: unknown) {if (isSound(value)) this.sound = value;}
-  constructor(public sr: number, public patch: Patch, public attack: AttackPatch, public liveTrims = false) {}
+  setSound(value: unknown) {if (isSound(value) && (value !== 'concert' || this.concertPatch)) this.sound = value;}
+  constructor(public sr: number, public patch: Patch, public attack: AttackPatch, public liveTrims = false, public concertPatch?: Patch) {}
   on(id: number, note: number, velocity: number) {
     if (!Number.isInteger(note) || note < 21 || note > 108 || !Number.isFinite(velocity) || velocity <= 0 || velocity > 1) return;
     // Duplicate MIDI attacks within 5 ms are ignored; a real restrike replaces the old string.
@@ -230,7 +230,8 @@ export class PianoEngine {
     for (let i = this.voices.length - 1; i >= 0; i--) {
       if (this.voices[i].fading && ++fades > MAX_FADING_VOICES) this.voices.splice(i, 1);
     }
-    const voice = new Voice(id, note, velocity, this.sr, this.patch, this.liveTrims ? liveAttackPatch(this.attack, note) : this.attack, this.sound);
+    const tonalPatch = this.sound === 'concert' ? this.concertPatch! : this.patch;
+    const voice = new Voice(id, note, velocity, this.sr, tonalPatch, this.liveTrims ? liveAttackPatch(this.attack, note) : this.attack, this.sound);
     voice.pedal(this.pedalPosition); this.voices.push(voice);
   }
   off(id: number) { for (const v of this.voices) if (v.id === id) {v.held = false; v.pedal(this.pedalPosition);} }

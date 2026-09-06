@@ -12,8 +12,11 @@ let script = await fs.readFile(new URL(scriptTag[1].replace(/^\//, ''), root), '
 const worklet = script.match(/"(\/assets\/piano-worklet-[^"]+\.js)"/);
 if (!worklet) throw new Error('Missing piano worklet asset');
 script = script.replaceAll(worklet[0], JSON.stringify(await dataURL(worklet[1].slice(1), 'text/javascript')));
-if (!script.includes('"/salamander.bin"')) throw new Error('Missing piano parameter asset');
-script = script.replaceAll('"/salamander.bin"', JSON.stringify(await dataURL('salamander.bin', 'application/octet-stream')));
+for (const file of ['salamander.bin', 'pianoteq.bin']) {
+  const reference = JSON.stringify('/' + file);
+  if (!script.includes(reference)) throw new Error(`Missing piano parameter asset: ${file}`);
+  script = script.replaceAll(reference, JSON.stringify(await dataURL(file, 'application/octet-stream')));
+}
 const css = await fs.readFile(new URL(cssTag[1].slice(1), root), 'utf8');
 if (/@import|url\(\s*["']?https?:/i.test(css)) throw new Error('Stylesheet has external dependencies');
 html = html.replace(scriptTag[0], () => `<script type="module">${script.replaceAll('</script', '<\\/script')}</script>`);
@@ -23,5 +26,5 @@ html = html.replace('<html ', `<!--\n${license.replaceAll('--', '—')}\n-->\n<h
 // Remove only generated Vite artifacts, after the standalone file is complete.
 await fs.writeFile(new URL('index.html', root), html);
 for (const entry of await fs.readdir(root)) if (entry !== 'index.html') await fs.rm(new URL(entry, root), {recursive: true});
-if (html.includes('/assets/') || html.includes('/salamander.bin') || html.includes('/LICENSE.txt')) throw new Error('Unresolved runtime asset reference');
+if (html.includes('/assets/') || html.includes('/salamander.bin') || html.includes('/pianoteq.bin') || html.includes('/LICENSE.txt')) throw new Error('Unresolved runtime asset reference');
 console.log(`Single-file deployment: ${path.resolve('dist/index.html')} (${Buffer.byteLength(html).toLocaleString()} bytes)`);

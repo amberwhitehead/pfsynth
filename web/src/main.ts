@@ -27,7 +27,14 @@ const held = new Map<string, {id: number; note: number}>();
 const mapping = ['a','w','s','e','d','f','t','g','y','h','u','j','k','o','l','p',';'];
 const names = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const noteName = (midi: number) => names[midi % 12] + (Math.floor(midi / 12) - 1);
-const patchPromise = fetch('/salamander.bin').then(r => {if (!r.ok) throw new Error('Piano data could not load'); return r.arrayBuffer();});
+function loadPatches() {
+  return Promise.all(['/salamander.bin', '/pianoteq.bin'].map(async url => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Piano data could not load');
+    return response.arrayBuffer();
+  }));
+}
+const patchPromise = loadPatches();
 // Observe preload errors immediately; retry is performed by the enable button.
 patchPromise.catch(() => {});
 const demo = new ScorePlayer(enable, (id, score) => {
@@ -45,9 +52,9 @@ async function enable() {
     context = new AudioContext({latencyHint: 'interactive'});
     await context.resume();
     $('status').textContent = 'Preparing piano…';
-    const patch = await patchPromise.catch(async () => {const r = await fetch('/salamander.bin'); if (!r.ok) throw new Error('Piano data could not load'); return r.arrayBuffer();});
+    const [patch, concertPatch] = await patchPromise.catch(loadPatches);
     await context.audioWorklet.addModule(workletURL);
-    node = new AudioWorkletNode(context, 'pfsynth-piano', {numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: {patch, attack: attackData}});
+    node = new AudioWorkletNode(context, 'pfsynth-piano', {numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: {patch, concertPatch, attack: attackData}});
     node.port.postMessage({type: 'sound', value: selectedSound});
     node.onprocessorerror = () => {panic(); node?.disconnect(); node = null; void context?.close(); context = null; fail(new Error('Audio stopped. Enable sound to restart.'));};
     volume = context.createGain(); volume.gain.value = Number($<HTMLInputElement>('volume').value) / 100;

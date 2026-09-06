@@ -4,12 +4,14 @@ import {PianoEngine, Patch, MAX_VOICES} from '../src/engine.ts';
 import {sounds} from '../src/presets.ts';
 const b=fs.readFileSync(new URL('../public/salamander.bin',import.meta.url));
 const patch=new Patch(b.buffer.slice(b.byteOffset,b.byteOffset+b.length));
+const c=fs.readFileSync(new URL('../public/pianoteq.bin',import.meta.url));
+const concertPatch=new Patch(c.buffer.slice(c.byteOffset,c.byteOffset+c.length));
 const attack=JSON.parse(fs.readFileSync(new URL('../src/attack.json',import.meta.url)));
 const originalData=JSON.stringify(attack), originalPatch=Buffer.from(patch.envelopes);
 const renders=new Map();
 for(const sound of Object.keys(sounds)) {
   for(const sr of [44100,48000]) {
-    const e=new PianoEngine(sr,patch,attack,true);e.setSound(sound);
+    const e=new PianoEngine(sr,patch,attack,true,concertPatch);e.setSound(sound);
     const block=new Float32Array(128), samples=[];
     e.on(1,60,.7);
     for(let i=0;i<Math.ceil(sr/128);i++){e.render(block);for(const x of block){assert(Number.isFinite(x));assert(Math.abs(x)<=1);samples.push(x);}}
@@ -25,4 +27,4 @@ for(const sound of Object.keys(sounds)) {
 const reference=renders.get('original');
 for(const [sound,samples] of renders){if(sound==='original')continue;let error=0,energy=0;for(let i=0;i<samples.length;i++){error+=(samples[i]-reference[i])**2;energy+=reference[i]**2;}assert(Math.sqrt(error/energy)>.1,`${sound} must produce a distinct waveform`);}
 assert.equal(JSON.stringify(attack),originalData);assert(Buffer.from(patch.envelopes).equals(originalPatch));
-console.log('All four sounds: distinct output, finite samples, release cleanup, voice budget, switching and immutable patches passed.');
+console.log('All five sounds: distinct output, finite samples, release cleanup, voice budget, switching and immutable patches passed.');
