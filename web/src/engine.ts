@@ -2,8 +2,10 @@
 // The fitted patch contains parameters, not recorded audio.
 export interface AttackPatch {
   mode_hz: number[]; mode_t60: number[]; mode_db: number[]; mode_delay_ms: number[];
+  mode_db_key: number[][];
   pulse_ms: number; pulse_cycles: number; thump_db: number[][]; noise_db: number[][];
   noise_ms: number[][]; noise_hz: number[][]; thump_mix: number; noise_mix: number;
+  slow_mix?: number; knock_mix?: number;
 }
 const TAU = 2 * Math.PI;
 const DAMP_FLOOR = 10 ** (-45 / 20);
@@ -14,17 +16,23 @@ const TIMES = [0, .015, .04, .09, .2, .45, .9, 1.8, 3.6, 6];
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (x: number, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const db = (x: number) => Math.pow(10, x / 20);
+// Register-dependent raised-cosine onset length (pf_onset_seconds): a struck bass string
+// builds over 20-40 ms where a treble note is at full level within ~2 ms.
+const onsetSeconds = (f1: number) => {
+  const T = f1 < 131 ? .022 * (131 / f1) ** .4 : .004 * (131 / f1) ** 1.2 + .002;
+  return Math.min(.045, Math.max(.002, T));
+};
 export class Patch {
   tuning: Float32Array;
   envelopes: Uint8Array;
   phases: Uint8Array;
   constructor(buffer: ArrayBuffer) {
-    if (buffer.byteLength !== 21240) throw new Error('Invalid pfsynth patch');
-    this.tuning = new Float32Array(30);
+    if (buffer.byteLength !== 42480) throw new Error('Invalid pfsynth patch');
+    this.tuning = new Float32Array(60);
     const view = new DataView(buffer);
-    for (let i = 0; i < 30; i++) this.tuning[i] = view.getFloat32(i * 4, true);
-    this.envelopes = new Uint8Array(buffer, 120, 19200);
-    this.phases = new Uint8Array(buffer, 19320, 1920);
+    for (let i = 0; i < 60; i++) this.tuning[i] = view.getFloat32(i * 4, true);
+    this.envelopes = new Uint8Array(buffer, 240, 38400);
+    this.phases = new Uint8Array(buffer, 38640, 3840);
   }
   envelope(anchor: number, layer: number, mode: number, point: number) {
     return this.envelopes[((anchor * 2 + layer) * 64 + mode) * 10 + point];
@@ -76,9 +84,9 @@ class Partial {
 }
 class Attack {
   modes: {a1: number; a2: number; g: number; delay: number; length: number; gain: number; y1: number; y2: number}[] = [];
-  noiseGain: number; noiseRate: number; lpA: number; lp1 = 0; lp2 = 0; rng: number; compensation: number;
+  noiseGain: number; noiseRate: number; lpA: number; lp1 = 0; lp2 = 0; rng: number; compensation: number; onsetS: number;
   constructor(p: AttackPatch, sr: number, midi: number, velocity: number) {
-    const key = clamp((midi - 24) / 6, 0, 14), lo = Math.floor(key), hi = Math.min(14, lo + 1);
+    const key = clamp((midi - 21) / 3, 0, 29), lo = Math.floor(key), hi = Math.min(29, lo + 1);
     const vel = (clamp(velocity * 127, 8, 127) - 48) / 52;
     const table = (t: number[][]) => mix(mix(t[lo][0], t[hi][0], key - lo), mix(t[lo][1], t[hi][1], key - lo), vel);
     const level = db(table(p.thump_db)) * p.thump_mix;
@@ -86,7 +94,11 @@ class Attack {
       const f = p.mode_hz[k]; if (f <= 0 || f >= sr * .45) continue;
       const R = Math.exp(-6.907755 / (p.mode_t60[k] * sr)), w = TAU * f / sr;
       const length = Math.max(1, Math.floor(p.pulse_ms * .001 * sr), Math.floor(p.pulse_cycles * sr / f));
-      this.modes.push({a1: 2 * R * Math.cos(w), a2: R * R, g: (k & 1 ? -1 : 1) * db(p.mode_db[k]) * Math.sin(w), delay: Math.floor(p.mode_delay_ms[k] * .001 * sr), length, gain: level * 2 / length, y1: 0, y2: 0});
+      // Per-anchor mode weight offsets: the body's mode weights vary ±5..10 dB from key to key.
+      const kdb = mix(p.mode_db_key[lo][k], p.mode_db_key[hi][k], key - lo);
+      // The trim bank splits on T60: slow room/body modes vs fast soundboard "knock" modes.
+      const group = p.mode_t60[k] >= .5 ? (p.slow_mix ?? 1) : (p.knock_mix ?? 1);
+      this.modes.push({a1: 2 * R * Math.cos(w), a2: R * R, g: (k & 1 ? -1 : 1) * db(p.mode_db[k] + kdb) * Math.sin(w) * group, delay: Math.floor(p.mode_delay_ms[k] * .001 * sr), length, gain: level * 2 / length, y1: 0, y2: 0});
     }
     this.noiseGain = db(table(p.noise_db)) * p.noise_mix;
     this.noiseRate = Math.exp(-6.907755 / (Math.max(5, table(p.noise_ms)) * .001 * sr));
@@ -94,6 +106,7 @@ class Attack {
     const r = (1 - this.lpA) ** 2;
     this.compensation = 1 / Math.sqrt(this.lpA ** 4 * (1 + r) / (1 - r) ** 3);
     this.rng = Math.trunc(midi * 7919 + velocity * 104729) | 1;
+    this.onsetS = onsetSeconds(440 * 2 ** ((midi - 69) / 12));
   }
   next(age: number, sr: number) {
     let sum = 0;
@@ -111,18 +124,21 @@ class Attack {
     this.lp1 += this.lpA * (u * 2 - this.lp1); this.lp2 += this.lpA * (this.lp1 - this.lp2);
     sum += this.noiseGain * this.compensation * Math.min(1, age / sr * 1000) * this.lp2;
     this.noiseGain *= this.noiseRate;
-    return sum;
+    // The whole onset layer rides the same register-dependent raised-cosine ramp as the tone.
+    const t = age / sr;
+    return sum * (t < this.onsetS ? .5 - .5 * Math.cos(Math.PI * t / this.onsetS) : 1);
   }
 }
 export class Voice {
-  partials: Partial[] = []; attack: Attack; age = 0; held = true; level = 1; damping = 1; segment = -1;
+  partials: Partial[] = []; attack: Attack; age = 0; held = true; level = 1; damping = 1; segment = -1; onsetS: number;
   pedalPosition = 0; releasedFrames = 0; fading = false; finished = false; fadeLeft = 0;
   fade() {if (!this.fading) {this.fading = true; this.fadeLeft = Math.max(1, Math.round(FADE_SECONDS * this.sr));}}
   constructor(public id: number, public midi: number, velocity: number, public sr: number, patch: Patch, attack: AttackPatch) {
-    const key = clamp((midi - 24) / 6, 0, 14), lo = Math.floor(key), hi = Math.min(lo + 1, 14), t = key - lo;
+    const key = clamp((midi - 21) / 3, 0, 29), lo = Math.floor(key), hi = Math.min(lo + 1, 29), t = key - lo;
     const vel = clamp((velocity * 127 - 48) / 52);
     const extra = velocity * 127 < 48 ? (velocity * 127 / 48) ** 1.5 : velocity * 127 > 100 ? (velocity * 127 / 100) ** 1.3 : 1;
     const f1 = 440 * 2 ** ((midi - 69) / 12) * mix(patch.tuning[lo * 2], patch.tuning[hi * 2], t);
+    this.onsetS = onsetSeconds(f1);
     const B = Math.exp(mix(Math.log(patch.tuning[lo * 2 + 1]), Math.log(patch.tuning[hi * 2 + 1]), t));
     for (let k = 0; k < 64; k++) {
       const h = k + 1, f = f1 * h * Math.sqrt((1 + B * h * h) / (1 + B));
@@ -152,7 +168,7 @@ export class Voice {
         this.segment = segment;
       }
       let sum = 0; for (const p of this.partials) sum += p.next(this.damping);
-      sum = Math.fround(sum * (t < .004 ? .5 - .5 * Math.cos(Math.PI * t / .004) : 1));
+      sum = Math.fround(sum * (t < this.onsetS ? .5 - .5 * Math.cos(Math.PI * t / this.onsetS) : 1));
       if (t < 2) sum = Math.fround(sum + this.attack.next(this.age, this.sr));
       if (this.fading) sum *= this.fadeLeft-- / Math.max(1, Math.round(FADE_SECONDS * this.sr));
       output[i] += sum; energy += sum * sum;
@@ -161,10 +177,10 @@ export class Voice {
   }
 }
 export class PianoEngine {
-  voices: Voice[] = []; pedalPosition = 0; peakEnv = 0;
+  voices: Voice[] = []; pedalPosition = 0; limGain = 1;
   constructor(public sr: number, public patch: Patch, public attack: AttackPatch) {}
   on(id: number, note: number, velocity: number) {
-    if (!Number.isInteger(note) || note < 24 || note > 108 || !Number.isFinite(velocity) || velocity <= 0 || velocity > 1) return;
+    if (!Number.isInteger(note) || note < 21 || note > 108 || !Number.isFinite(velocity) || velocity <= 0 || velocity > 1) return;
     // Fade stolen voices instead of cutting an arbitrary waveform mid-cycle.
     let live = 0, candidate: Voice | undefined, lowest = Infinity;
     for (const v of this.voices) {
@@ -192,19 +208,23 @@ export class PianoEngine {
     let kept = 0;
     for (const v of this.voices) {
       if (v.finished) continue;
-      if (!v.fading && v.age / this.sr > .5 && v.level < 1e-5) v.fade();
+      if (!v.fading && v.age / this.sr > .5 && v.level < 3e-5) v.fade(); // ~-90 dBFS: inaudible in any mix
       this.voices[kept++] = v;
     }
     this.voices.length = kept;
-    // Master: makeup into a limiter, then the tanh safety. Several ff voices sum past
-    // full scale, which slammed the tanh into square-wave buzz on chords; track the
-    // peak (instant attack, slow release) and undo only the excess, so a single note
-    // reaches the tanh exactly as before while polyphony gets pulled back transparently.
-    const release = Math.exp(-1 / (.13 * this.sr));
+    // Master makeup + block-lookahead peak limiter, as in the native player: the block's own
+    // peak is the lookahead, gain reduction is instant with a 250 ms release ramped in over
+    // the first 32 samples, and a hard clamp remains as a safety net.  No waveshaping: a tanh
+    // here distorted every fff chord.  +6 dB matches the demo app's live gain.
+    const g = 2;
+    let peak = 0;
+    for (let i = 0; i < output.length; i++) {const a = Math.abs(output[i]) * g; if (a > peak) peak = a;}
+    const target = peak > .95 ? .95 / peak : 1, prev = this.limGain;
+    this.limGain = target < prev ? target : prev + (1 - prev) * (1 - Math.exp(-output.length / (this.sr * .25)));
     for (let i = 0; i < output.length; i++) {
-      const x = output[i] * 3, peak = Math.abs(x);
-      this.peakEnv = peak > this.peakEnv ? peak : this.peakEnv * release + peak * (1 - release);
-      output[i] = Math.tanh(x * (this.peakEnv > 1 ? 1 / this.peakEnv : 1));
+      const lg = i < 32 ? prev + (this.limGain - prev) * (i / 32) : this.limGain;
+      const x = output[i] * g * lg;
+      output[i] = x < -1 ? -1 : x > 1 ? 1 : x;
     }
   }
 }
